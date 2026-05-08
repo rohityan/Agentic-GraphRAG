@@ -1,49 +1,78 @@
-***
-
 # 🧠 Agentic Repo GraphRAG
 
-**An Enterprise-Grade Repository Intelligence and Analytics System.**
+**An Enterprise-Grade Repository Intelligence System.**
 
-This project ingests an entire GitHub repository (Issues, Pull Requests, Releases, Documentation, and Python AST Codebase) into a **Google Cloud Spanner Property Graph**. It utilizes a "Two-Brain" AI architecture powered by **Vertex AI (Gemini 2.5)** to perform deterministic data extraction, followed by asynchronous agentic reasoning to find root causes, duplicate issues, and cross-ticket logic.
+This project ingests an entire GitHub repository (Issues, Pull Requests, Releases, Documentation, and Python AST Codebase) into a **Google Cloud Spanner Property Graph**. It utilizes a "Two-Brain" AI architecture powered by **Vertex AI (Gemini 3.1 Pro / 2.5 Flash)** and the **Google Agent Development Kit (ADK)** to perform deterministic data extraction, background deduplication, and conversational GraphRAG.
 
-## 🏗 Architecture: The "Two-Brain" System
+---
 
-1. **System 1: Ingestion Pipeline (`/ingestion`)**
-   * **Fast & Deterministic:** Periodically syncs GitHub GraphQL/REST APIs and raw Git diffs.
-   * **Structured Extraction:** Uses Gemini 2.5 Flash with strict `Pydantic` schemas to categorize triage states, summarize PR diffs, and extract exact Python modules.
-   * **GraphRAG Foundation:** Embeds data using `text-embedding-004` and builds definitive Spanner edges (e.g., `(PullRequest)-[Resolves]->(Issue)`, `(CodeNode)-[DependsOn]->(CodeNode)`).
+## 🏗 Architecture Overview
 
-2. **System 2: Agentic Reviewer (`/agents/reviewer_agent`)**
-   * **Asynchronous & Exploratory:** Built on the Google ADK framework.
-   * **Nightly Triage:** Automatically wakes up to review un-analyzed PRs and Issues.
-   * **Graph Traversal:** Uses tool-calling (`traverse_repository_graph`, `search_codebase`) to semantically and structurally map duplicates and suggest maintainer actions.
+This system is divided into three primary layers:
+
+### 1. Deterministic Data Ingestion (`/ingestion`)
+* **Highly Concurrent:** Uses `uv`, `aiohttp`, and `asyncio` to perform high-speed incremental delta-syncs from GitHub (GraphQL/REST).
+* **AST Parsing:** Parses raw Python code into an Abstract Syntax Tree (AST) via `astroid`, mapping functions and classes into `CodeNodes` and `DependsOn` edges.
+* **Structured Extraction:** Passes raw data through Gemini 2.5 Flash with strict `Pydantic` schemas to categorize triage states, extract technical summaries, and map impacted modules.
+
+### 2. Background Deduplication Agent (`/agents/dedup_agent`)
+* **Duplicate Detection:** Automatically checks for duplicates by evaluating semantically similar Issues and Pull Requests against each other.
+* **Vector Math & Logic:** Uses Cosine Distance searches to find mathematically similar tickets, then uses LLM reasoning to determine true root causes.
+* **Database Caching:** Saves this deduplication analysis natively into Spanner, saving expensive compute time for the interactive foreground agent.
+
+### 3. Interactive GraphRAG Agent (`/agents/graphrag_agent`)
+* **The Conversational Bridge:** This is the primary agent with which interaction happens, connecting the user directly to the Spanner database to answer complex questions about the repository.
+* **Native Graph Traversal:** Dynamically writes Spanner GQL (`GRAPH_TABLE`) and SQL to traverse relational edges based on user prompts.
+* **Safe Code Execution:** Features an isolated `uv` sandbox tool (`verify_python_snippet`) to write and run Minimal Reproducible Examples (MREs).
+* **MCP Fallbacks:** Integrates the official GitHub Model Context Protocol (MCP) server as a fallback to read live tickets.
+
+---
+
+## 📂 Project Structure
+
+```text
+Agentic-GraphRAG/
+├── schema/
+│   └── spanner_graph.ddl       # Spanner Relational & Property Graph Schema
+├── ingestion/                  # SYSTEM 1: Deterministic Sync Pipelines
+│   ├── core/                   # Shared settings, clients, and DB utilities
+│   ├── models.py               # Pydantic Schemas for AI Extraction
+│   ├── sync_codebase.py        # AST parsing and embedding
+│   ├── sync_docs.py            # Architecture and Skills chunking
+│   ├── sync_issues.py          # GitHub GraphQL Issue parsing
+│   ├── sync_prs.py             # Pull Request Git Diff parsing
+│   └── sync_releases.py        # Release notes and Ghost Feature tracking
+├── agents/                     # SYSTEM 2 & 3: Agentic Reasoning
+│   ├── dedup_agent/            # Agent to check for semantically similar duplicates
+│   └── graphrag_agent/         # Interactive agent connecting the user to Spanner DB
+├── sync_all.sh                 # Unified pipeline execution script
+├── Dockerfile                  # Optimized uv-based deployment image
+└── requirements.txt            
+```
 
 ---
 
 ## 🚀 Getting Started (Local Development)
 
-This project uses [**uv**](https://github.com/astral-sh/uv) for lightning-fast Python dependency management.
+This project uses[**uv**](https://github.com/astral-sh/uv) for lightning-fast Python dependency management.
 
 ### 1. Prerequisites
 * Python 3.12+
 * Git installed locally
 *[Google Cloud SDK (`gcloud`)](https://cloud.google.com/sdk/docs/install)
-* A Google Cloud Project with Vertex AI and Cloud Spanner enabled.
+* Node.js (for `npx` / MCP GitHub Server)
 
-### 2. Install `uv` and Setup Environment
+### 2. Setup Environment
 ```bash
-# Install uv (if you haven't already)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
 # Clone the repository
-git clone https://github.com/your-org/agentic-repo-graphrag.git
-cd agentic-repo-graphrag
+git clone https://github.com/your-org/Agentic-GraphRAG.git
+cd Agentic-GraphRAG
 
-# Create and activate a virtual environment
+# Create and activate a virtual environment via uv
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies instantly
+# Install dependencies
 uv pip install -r requirements.txt
 ```
 
@@ -59,9 +88,9 @@ GITHUB_REPO_NAME=adk-python
 GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 GOOGLE_CLOUD_LOCATION=us-central1
 SPANNER_INSTANCE_ID=your-spanner-instance
-SPANNER_DATABASE_ID=your-spanner-database
+SPANNER_DATABASE_ID=your-spanner-db
 
-# Execution Settings (Leave False for standard incremental syncs)
+# Execution Settings
 FORCE_RESYNC=False
 ```
 
@@ -73,75 +102,87 @@ gcloud config set project your-gcp-project-id
 gcloud auth application-default set-quota-project your-gcp-project-id
 ```
 
+### 5. Initialize the Database
+Run the schema DDL in Spanner Studio or via the CLI to create the tables, vector indexes, and Property Graph:
+```bash
+gcloud spanner databases ddl update your-spanner-db \
+    --instance=your-spanner-instance \
+    --file=schema/spanner_graph.ddl
+```
+
 ---
 
-## 💻 Running the Pipelines
+## 💻 Running the System
 
-You can run individual modules directly from the root of the project using Python's `-m` flag.
-
-### Run Incremental Syncs
+### Data Ingestion
+Run individual sync modules incrementally:
 ```bash
-# Sync specific pipelines
-python -m ingestion.sync_docs
 python -m ingestion.sync_codebase
 python -m ingestion.sync_issues
-python -m ingestion.sync_prs
-python -m ingestion.sync_releases
-
-# Run the Nightly Review Agent
-python -m agents.reviewer_agent.main
 ```
+*Note: To force a complete historical backfill (ignoring database timestamps), prepend `FORCE_RESYNC=1` to the command.*
 
-### Force a Complete Historical Backfill
-By default, the sync scripts only fetch data modified since the last successful run. To override the database cursors and force a complete re-evaluation of historical data, pass the `FORCE_RESYNC=1` flag:
+### Background Deduplication
 ```bash
-FORCE_RESYNC=1 python -m ingestion.sync_prs
+python -m agents.dedup_agent.main
 ```
 
-### Run the Entire Unified Flow
-To test the exact sequence that runs in production:
+### Conversational GraphRAG Agent (Local Testing)
+Because the GraphRAG Agent is a native Google ADK application, you can test it locally using the ADK CLI tools.
+
+**To test in your terminal:**
 ```bash
-./sync_all.sh
+adk run agents.graphrag_agent.main:app
 ```
 
----
-
-## 🐳 Docker & Production Deployment
-
-The project is packaged via a highly-optimized Docker container utilizing `uv --system` installs and disabling background OTEL/Spanner metrics for cost efficiency. 
-
-To deploy as a unified **Google Cloud Run Job**:
-1. Build the container.
-2. Deploy the job targeting the `./sync_all.sh` entry point.
-3. Schedule the execution using **Google Cloud Scheduler** (e.g., `0 */4 * * *` for every 4 hours).
-
----
-
-## 📂 Project Structure
-
-```text
-agentic-repo-graphrag/
-├── Dockerfile                  # Optimized uv-based deployment image
-├── requirements.txt            
-├── sync_all.sh                 # Unified execution script for Cloud Run
-│
-├── ingestion/                  # SYSTEM 1: Deterministic Sync Pipelines
-│   ├── core/                   # Shared Spanner, Vertex AI, and GitHub utilities
-│   ├── models.py               # Strict Pydantic LLM Output Schemas
-│   ├── sync_codebase.py        # Python AST ASTroid parsing
-│   ├── sync_docs.py            # Architecture and Skill MD chunking
-│   ├── sync_issues.py          # GitHub GraphQL Issue parsing
-│   ├── sync_prs.py             # Pull Request Git Diff parsing
-│   └── sync_releases.py        # Release notes and commit diffs
-│
-├── agents/                     # SYSTEM 2: Agentic Reasoning
-│   └── reviewer_agent/         # Nightly duplicate & root-cause analyzer
-│       ├── agent.py            # GraphRAG Tools and ADK prompt definition
-│       └── main.py             # Async worker loop
-│
-└── schema/
-    └── spanner_graph.ddl       # Spanner Relational & Property Graph Schema
+**To test using the local Web UI:**
+```bash
+adk web agents.graphrag_agent.main:app
 ```
+*(If port 8000 is blocked, you can append `--port 8080` to the web command).*
+
+**Example Prompts to test:**
+* *"Verify if the changes proposed in PR #5559 are already implemented in the live codebase."*
+* *"Write a Spanner GQL query to traverse the `DependsOn` edge and tell me what internal functions the `InMemoryRunner` class relies on."*
 
 ---
-*Built with Google Cloud Spanner, Vertex AI Gemini 2.5, and the Google ADK.*
+
+## 🐳 Cloud Deployment
+
+This architecture utilizes two distinct deployment strategies on Google Cloud:
+
+### 1. Ingestion & Deduplication Pipeline (Cloud Run Job)
+The ingestion pipeline and dedup worker are packaged in an optimized Docker container and run as a scheduled batch job. We utilize Google Secret Manager to securely inject the GitHub API token.
+
+```bash
+gcloud run jobs deploy your-schedule-name \
+    --source . \
+    --region your-region \
+    --memory 2Gi \
+    --task-timeout 2h \
+    --service-account graphrag-your-service-account-name \
+    --set-env-vars="GOOGLE_CLOUD_PROJECT=your-project,GOOGLE_CLOUD_LOCATION=your-location,SPANNER_INSTANCE_ID=your-spanner-instance,SPANNER_DATABASE_ID=your-spanner-db,GITHUB_REPO_OWNER=repo-owner,GITHUB_REPO_NAME=repo-name" \
+    --set-secrets="GITHUB_TOKEN=your-secret-name:latest"
+```
+*(Once deployed, you can trigger this via Google Cloud Scheduler to run automatically).*
+
+### 2. Interactive GraphRAG Agent (Cloud Run Service)
+The conversational agent is deployed as a continuously running web service. The command below deploys the agent with a built-in Web UI, custom CORS settings, and fine-tuned scaling limits.
+
+```bash
+adk deploy cloud_run \
+    --adk_version="1.32.0" \
+    --service_name="your-service-name" \
+    --project=your-project \
+    --region=your-region \
+    --with_ui \
+    --allow_origins="*" \
+    agents.graphrag_agent.main:app \
+    -- \
+    --service-account=your-service-account \
+    --set-env-vars="SPANNER_INSTANCE_ID=your-spanner-instance,SPANNER_DATABASE_ID=your-spanner-db" \
+    --timeout=600s \
+    --memory=2Gi \
+    --cpu=2 \
+    --max-instances=5
+```
