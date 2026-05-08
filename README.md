@@ -2,7 +2,7 @@
 
 **An Enterprise-Grade Repository Intelligence System.**
 
-This project ingests an entire GitHub repository (Issues, Pull Requests, Releases, Documentation, and Python AST Codebase) into a **Google Cloud Spanner Property Graph**. It utilizes a "Two-Brain" AI architecture powered by **Vertex AI (Gemini 3.1 Pro / 2.5 Flash)** and the **Google Agent Development Kit (ADK)** to perform deterministic data extraction, background deduplication, and conversational GraphRAG.
+This project ingests an entire GitHub repository (Issues, Pull Requests, Releases, Documentation, and Python AST Codebase) into a **Google Cloud Spanner Property Graph**. It utilizes a "Two-Brain" AI architecture powered by **Vertex AI (Gemini 2.5 Pro / 2.5 Flash)** and the **Google Agent Development Kit (ADK)** to perform deterministic data extraction, background deduplication, and conversational GraphRAG.
 
 ---
 
@@ -128,18 +128,21 @@ python -m agents.dedup_agent.main
 ```
 
 ### Conversational GraphRAG Agent (Local Testing)
-Because the GraphRAG Agent is a native Google ADK application, you can test it locally using the ADK CLI tools.
+Because the GraphRAG Agent is a native Google ADK application, you can test it locally using the ADK CLI tools. First, navigate into the `agents` folder:
+```bash
+cd agents
+```
 
 **To test in your terminal:**
 ```bash
-adk run agents.graphrag_agent.main:app
+adk run graphrag_agent
 ```
 
 **To test using the local Web UI:**
 ```bash
-adk web agents.graphrag_agent.main:app
+adk web graphrag_agent
 ```
-*(If port 8000 is blocked, you can append `--port 8080` to the web command).*
+*(Alternatively, you can just run `adk web` and interactively select `graphrag_agent` from the list. If port 8000 is blocked, you can append `--port 8080`).*
 
 **Example Prompts to test:**
 * *"Verify if the changes proposed in PR #5559 are already implemented in the live codebase."*
@@ -186,3 +189,4 @@ adk deploy cloud_run \
     --cpu=2 \
     --max-instances=5
 ```
+
