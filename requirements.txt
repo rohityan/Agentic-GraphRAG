@@ -1,0 +1,16 @@
+# GCP Services
+google-cloud-spanner
+google-genai
+
+# Async HTTP & Retries
+aiohttp
+tenacity
+
+# Data Validation & Parsing
+pydantic
+astroid
+
+# Configuration
+python-dotenv
+
+google-adk

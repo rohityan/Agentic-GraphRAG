@@ -1,0 +1,16 @@
+# Ignore local virtual environments (We use UV inside the container)
+.venv/
+venv/
+env/
+
+# Ignore local secrets
+.env
+
+# Ignore git history (makes your docker image smaller)
+.git/
+.gitignore
+
+# Ignore cache
+__pycache__/
+*.pyc
+.DS_Store
